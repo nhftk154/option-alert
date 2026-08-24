@@ -1,6 +1,7 @@
-"""Hebrew alert message templates and send orchestration. Kept independent
-from the score/volume computation (scoring.py, equity_volume.py) so message
-formatting can change without touching detection logic."""
+"""Alert message templates (English, "Hot Contract" card style) and send
+orchestration. Kept independent from the score/volume computation
+(scoring.py, equity_volume.py) so message formatting can change without
+touching detection logic."""
 
 from datetime import datetime, timezone
 
@@ -38,19 +39,19 @@ def build_alert_text_options(result: ScoreResult) -> str:
     )
 
     return (
-        f"{emoji} חוזה חם: {result.ticker}\n"
+        f"{emoji} Hot Contract: {result.ticker}\n"
         f"{result.ticker} {result.strike:g} {kind_letter} {result.expiry.isoformat()} ({result.dte} DTE)\n"
         f"\n"
-        f"נפח כולל: {result.volume:,.0f}\n"
-        f"ריבית פתוחה: {result.open_interest:,.0f}\n"
-        f"יחס Vol/OI: {result.vol_oi_ratio:.1f}x\n"
-        f"מרחק מהמחיר הנוכחי: {distance_pct:+.0f}%\n"
-        f"פרמיה: ${result.notional_usd:,.0f}\n"
-        f"מחיר עסקה אחרון: ${avg_fill_usd:,.2f}\n"
-        f"תנודתיות גלומה: {result.iv * 100:.0f}% מול קו בסיס {result.baseline_vol * 100:.0f}%\n"
-        f"ציון חריגות: {result.score:.0f}/100\n"
+        f"Overall Volume: {result.volume:,.0f}\n"
+        f"Open Interest: {result.open_interest:,.0f}\n"
+        f"Vol/OI: {result.vol_oi_ratio:.1f}x\n"
+        f"Distance from price: {distance_pct:+.0f}%\n"
+        f"Premium: ${result.notional_usd:,.0f}\n"
+        f"Last Fill: ${avg_fill_usd:,.2f}\n"
+        f"IV: {result.iv * 100:.0f}% vs baseline {result.baseline_vol * 100:.0f}%\n"
+        f"Anomaly Score: {result.score:.0f}/100\n"
         f"\n"
-        f"לבדיקה ידנית: {link}"
+        f"Manual check: {link}"
     )
 
 
@@ -58,11 +59,11 @@ def build_alert_text_equity_volume(alert: EquityVolumeAlert) -> str:
     emoji = "🟡"
     link = f"https://finance.yahoo.com/quote/{alert.ticker}"
     return (
-        f"{emoji} נפח מסחר חריג במניה: {alert.ticker}\n"
-        f"נפח היום: {alert.today_volume:,.0f}\n"
-        f"ממוצע 20 יום: {alert.avg_volume_20d:,.0f}\n"
-        f"יחס: פי {alert.ratio:.1f} מהממוצע\n"
-        f"לבדיקה ידנית: {link}"
+        f"{emoji} Unusual Stock Volume: {alert.ticker}\n"
+        f"Today's Volume: {alert.today_volume:,.0f}\n"
+        f"20-Day Average: {alert.avg_volume_20d:,.0f}\n"
+        f"Ratio: {alert.ratio:.1f}x average\n"
+        f"Manual check: {link}"
     )
 
 

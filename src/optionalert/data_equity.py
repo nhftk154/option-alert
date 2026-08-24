@@ -10,6 +10,7 @@ from datetime import date, datetime, timezone
 import numpy as np
 
 from .config import CONFIG
+from .market_hours import NY_TZ
 from .models import AssetClass, OptionContractRow, OptionKind, UnderlyingSnapshot
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,7 @@ def fetch_option_chain(ticker: str, max_dte: int | None = None) -> list[OptionCo
 
     rows: list[OptionContractRow] = []
     today = date.today()
+    today_ny = datetime.now(NY_TZ).date()
     expirations = _with_retry(lambda: tk.options)
 
     for expiry_str in expirations:
@@ -60,6 +62,15 @@ def fetch_option_chain(ticker: str, max_dte: int | None = None) -> list[OptionCo
                 if volume is None or math.isnan(volume) or not volume:
                     continue
                 if iv is None or math.isnan(iv):
+                    continue
+                # yfinance doesn't zero out volume/iv for contracts that
+                # simply haven't traded today - it keeps showing whatever was
+                # last known, from however many days ago. lastTradeDate is
+                # the only way to tell "traded today" from "stale snapshot".
+                last_trade = r.get("lastTradeDate")
+                if last_trade is None or last_trade != last_trade:  # NaT check, avoids a pandas import
+                    continue
+                if last_trade.tz_convert(NY_TZ).date() != today_ny:
                     continue
                 oi = 0.0 if oi is None or math.isnan(oi) else oi
                 rows.append(OptionContractRow(
