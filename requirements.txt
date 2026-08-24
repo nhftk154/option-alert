@@ -1,0 +1,9 @@
+yfinance>=0.2.40
+pandas>=2.0
+pandas_market_calendars>=4.4
+requests>=2.31
+gspread>=6.1
+google-auth>=2.30
+matplotlib>=3.8
+lxml>=5.0
+pytest>=8.0

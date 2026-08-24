@@ -1,0 +1,53 @@
+name: Scan for unusual options activity
+
+on:
+  schedule:
+    # Every 10 minutes, 13:00-21:59 UTC, Mon-Fri. This window is a superset of
+    # NYSE regular hours (09:30-16:00 ET) under both EDT and EST - the exact
+    # gate is done in Python (market_hours.is_nyse_open) so DST drift never
+    # causes a missed or spurious run.
+    - cron: '*/10 13-21 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Print alerts instead of sending/writing'
+        type: boolean
+        default: false
+      tickers:
+        description: 'Comma-separated ticker override (bypasses sharding)'
+        type: string
+        default: ''
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - run: pip install -r requirements.txt
+
+      - name: Run scan
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_SHEET_ID: ${{ secrets.GOOGLE_SHEET_ID }}
+          PYTHONPATH: src
+        run: |
+          ARGS=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          if [ -n "${{ inputs.tickers }}" ]; then ARGS="$ARGS --tickers ${{ inputs.tickers }}"; fi
+          python -m optionalert.run_scan $ARGS
