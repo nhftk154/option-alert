@@ -166,10 +166,15 @@ def main() -> int:
 
     if override_tickers:
         # Manual smoke-test path: doesn't need the committed universe cache to
-        # exist yet, only the fixed crypto list from config.
+        # exist yet, only the fixed crypto list from config. Still tries to
+        # load tvremix_symbols from the cache if it does exist, purely so
+        # manual --tickers test runs can also exercise tvremix refinement.
         equity_batch = override_tickers
         crypto_batch = list(CONFIG.universe.crypto)
-        tvremix_symbols = {}
+        try:
+            tvremix_symbols = get_universe().tvremix_symbols or {}
+        except Exception:
+            tvremix_symbols = {}
     else:
         universe = get_universe()
         shard_index = get_shard_index(now, CONFIG.schedule.n_shards, CONFIG.schedule.shard_interval_minutes)
