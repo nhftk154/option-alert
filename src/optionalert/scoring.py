@@ -54,6 +54,11 @@ def score_contract(row: OptionContractRow, baseline_vol: float) -> ScoreResult |
         vol_oi_ratio=vol_oi_ratio,
         iv=row.iv,
         baseline_vol=baseline_vol,
+        dte=row.dte,
+        volume=row.volume,
+        open_interest=row.open_interest,
+        last_price=row.last_price,
+        underlying_price=row.underlying_price,
     )
 
 

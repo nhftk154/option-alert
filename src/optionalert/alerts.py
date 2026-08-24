@@ -9,8 +9,6 @@ from .cooldown import CooldownState, is_on_cooldown, mark_alerted
 from .models import AssetClass, EquityVolumeAlert, OptionKind, ScoreResult
 from .telegram_client import send_telegram_message
 
-_KIND_HEBREW = {OptionKind.CALL: "קול (CALL)", OptionKind.PUT: "פוט (PUT)"}
-
 
 def severity_emoji(score: float) -> str:
     return "🔴" if score >= CONFIG.thresholds.severity_extreme else "🟡"
@@ -24,16 +22,34 @@ def yahoo_option_chain_url(ticker: str, asset_class: AssetClass) -> str:
 
 def build_alert_text_options(result: ScoreResult) -> str:
     emoji = severity_emoji(result.score)
-    kind_he = _KIND_HEBREW[result.kind]
+    kind_letter = "C" if result.kind == OptionKind.CALL else "P"
     link = yahoo_option_chain_url(result.ticker, result.asset_class)
+
+    # Signed distance from the current price - deliberately not labeled
+    # ITM/OTM, since that sign flips between calls and puts and a plain
+    # distance is unambiguous for both.
+    distance_pct = (result.strike - result.underlying_price) / result.underlying_price * 100
+
+    # Deribit premiums are coin-denominated; equities/metals are already USD.
+    avg_fill_usd = (
+        result.last_price * result.underlying_price
+        if result.asset_class == AssetClass.CRYPTO
+        else result.last_price
+    )
+
     return (
-        f"{emoji} פעילות אופציות חריגה: {result.ticker}\n"
-        f"סוג: {kind_he}\n"
-        f"ציון חריגות: {result.score:.0f}/100\n"
-        f"נפח/ריבית פתוחה: {result.vol_oi_ratio:.1f}x\n"
+        f"{emoji} חוזה חם: {result.ticker}\n"
+        f"{result.ticker} {result.strike:g} {kind_letter} {result.expiry.isoformat()} ({result.dte} DTE)\n"
+        f"\n"
+        f"נפח כולל: {result.volume:,.0f}\n"
+        f"ריבית פתוחה: {result.open_interest:,.0f}\n"
+        f"יחס Vol/OI: {result.vol_oi_ratio:.1f}x\n"
+        f"מרחק מהמחיר הנוכחי: {distance_pct:+.0f}%\n"
+        f"פרמיה: ${result.notional_usd:,.0f}\n"
+        f"מחיר עסקה אחרון: ${avg_fill_usd:,.2f}\n"
         f"תנודתיות גלומה: {result.iv * 100:.0f}% מול קו בסיס {result.baseline_vol * 100:.0f}%\n"
-        f"ערך נקוב: ${result.notional_usd:,.0f}\n"
-        f"פקיעה: {result.expiry.isoformat()} | סטרייק: {result.strike:g}\n"
+        f"ציון חריגות: {result.score:.0f}/100\n"
+        f"\n"
         f"לבדיקה ידנית: {link}"
     )
 

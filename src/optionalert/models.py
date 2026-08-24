@@ -68,6 +68,11 @@ class ScoreResult:
     vol_oi_ratio: float
     iv: float
     baseline_vol: float
+    dte: int
+    volume: float
+    open_interest: float
+    last_price: float
+    underlying_price: float
 
 
 @dataclass
