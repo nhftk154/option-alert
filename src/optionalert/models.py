@@ -37,10 +37,14 @@ class OptionContractRow:
         # Dollar value of premium traded (the block/sweep-size proxy), not the
         # notional value of shares/coins controlled.
         # Equities/ETFs: 1 contract = 100 shares, priced at the option premium.
-        # Crypto (Deribit): premium is quoted in the coin itself, so volume is
-        # converted to USD via the index price instead of last_price.
+        # Crypto (Deribit): premium is quoted in the coin itself (last_price is
+        # in BTC/ETH, not USD), so it's converted via the index price on top of
+        # last_price - dropping last_price here (as a prior version of this
+        # code did) computes the notional value of coins controlled instead of
+        # the premium paid, off by orders of magnitude for anything not deep
+        # ITM.
         if self.asset_class == AssetClass.CRYPTO:
-            return self.volume * self.underlying_price
+            return self.volume * self.last_price * self.underlying_price
         return self.volume * 100 * self.last_price
 
 
