@@ -24,4 +24,9 @@ def send_telegram_message(text: str) -> None:
         },
         timeout=_TIMEOUT,
     )
-    resp.raise_for_status()
+    if not resp.ok:
+        # requests' own HTTPError message drops the response body, which is
+        # where Telegram actually explains *why* (e.g. "chat not found",
+        # "can't parse entities") - surface it so failures are diagnosable
+        # from CI logs alone.
+        raise RuntimeError(f"Telegram sendMessage failed ({resp.status_code}): {resp.text}")
