@@ -82,8 +82,15 @@ def _refine_with_tvremix(result, tvremix_symbol):
         tvremix_symbol, result.expiry.isoformat(), result.strike, result.kind.value.lower(),
     )
     if new_iv is None:
+        logger.info("tvremix: no corroborating IV for %s %s %s", result.ticker, result.strike, result.kind.value)
         return result
-    return rescore_with_iv(result, new_iv)
+    rescored = rescore_with_iv(result, new_iv)
+    logger.info(
+        "tvremix: refined %s %s %s IV %.0f%% -> %.0f%%, score %.0f -> %.0f",
+        result.ticker, result.strike, result.kind.value,
+        result.iv * 100, new_iv * 100, result.score, rescored.score,
+    )
+    return rescored
 
 
 def scan_equity_symbol(ticker, now, cooldown_state, alert_lock, dry_run, history_buffer, tvremix_symbols):

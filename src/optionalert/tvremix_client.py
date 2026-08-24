@@ -40,7 +40,13 @@ def _post(payload: dict) -> dict | None:
     }
     try:
         resp = requests.post(_BASE_URL, headers=headers, json=payload, timeout=_TIMEOUT)
-        resp.raise_for_status()
+        if not resp.ok:
+            # Same lesson as telegram_client.py: raise_for_status() alone
+            # drops the response body, which is where the real reason lives
+            # (bad key, wrong scope, rate limit) - log it so a first-time
+            # setup issue is diagnosable from CI logs, not just "400/401".
+            logger.warning("tvremix request failed (%s): %s", resp.status_code, resp.text[:500])
+            return None
         return resp.json()
     except Exception as exc:
         logger.warning("tvremix request failed: %s", exc)
