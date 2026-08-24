@@ -4,7 +4,6 @@ the committed cache (get_universe) — it never rebuilds it live."""
 
 import json
 import logging
-import time
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,21 +45,46 @@ def fetch_sp500_symbols() -> list[str]:
     return symbols.tolist()
 
 
-def rank_by_market_cap(symbols: list[str], top_n: int) -> list[str]:
-    """Rank symbols by market cap (yfinance fast_info, cheaper than .info) and
-    keep the top N. Tickers that fail to fetch are skipped, not fatal."""
+_MARKET_CAP_WORKERS = 10
+
+
+def _fetch_market_cap(sym: str) -> tuple[str, float] | None:
     import yfinance as yf
 
+    fi = yf.Ticker(sym).fast_info
+    cap = fi.get("market_cap") or fi.get("marketCap")
+    return (sym, float(cap)) if cap else None
+
+
+def rank_by_market_cap(symbols: list[str], top_n: int) -> list[str]:
+    """Rank symbols by market cap (yfinance fast_info, cheaper than .info) and
+    keep the top N. Tickers that fail are skipped, not fatal.
+
+    Bootstrapping the real 503-symbol S&P list sequentially took 14m36s, with
+    a single ticker (MRK) hanging for over 5 minutes on yfinance's own
+    internal HTTP timeout - nearly exhausting refresh_universe.yml's job
+    budget on its own, since a sequential loop means every other ticker waits
+    behind that one stuck request. Fetches now run concurrently (10 workers),
+    so a stuck ticker no longer blocks the other ~500 from completing almost
+    immediately - but note this does NOT put a hard cap on any single
+    ticker's own worst case: concurrent.futures gives no way to abandon an
+    already-running thread, so the function still can't return until every
+    submitted fetch finishes (or hits yfinance's own internal timeout,
+    observed at ~5 min). refresh_universe.yml's timeout-minutes has a wide
+    margin above that for this reason."""
+    import concurrent.futures
+
     ranked = []
-    for sym in symbols:
-        try:
-            fi = yf.Ticker(sym).fast_info
-            cap = fi.get("market_cap") or fi.get("marketCap")
-            if cap:
-                ranked.append((sym, float(cap)))
-        except Exception as exc:
-            logger.warning("market cap lookup failed for %s: %s", sym, exc)
-        time.sleep(0.1)  # gentle pacing against the unofficial Yahoo endpoint
+    with concurrent.futures.ThreadPoolExecutor(max_workers=_MARKET_CAP_WORKERS) as pool:
+        futures = {pool.submit(_fetch_market_cap, sym): sym for sym in symbols}
+        for future in concurrent.futures.as_completed(futures):
+            sym = futures[future]
+            try:
+                result = future.result()
+                if result:
+                    ranked.append(result)
+            except Exception as exc:
+                logger.warning("market cap lookup failed for %s: %s", sym, exc)
 
     ranked.sort(key=lambda pair: pair[1], reverse=True)
     return [sym for sym, _ in ranked[:top_n]]

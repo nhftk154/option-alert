@@ -12,7 +12,16 @@ permissions:
 jobs:
   refresh_universe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Measured locally: 14m36s sequential (one ticker, MRK, hit yfinance's own
+    # ~5min internal HTTP timeout with nothing else able to proceed while it
+    # blocked). universe.py's rank_by_market_cap now fetches concurrently
+    # (10 workers), which lets the other ~500 tickers finish almost
+    # immediately regardless of stragglers - but a stuck fetch still isn't
+    # forcibly cancellable, so the true worst case is still bounded by
+    # yfinance's own timeout, not by us. 25 minutes covers that plus room for
+    # more than one straggler; this job only runs once a week, so a longer
+    # ceiling costs nothing.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
