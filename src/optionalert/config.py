@@ -37,6 +37,13 @@ class Thresholds:
 
 @dataclass(frozen=True)
 class ScheduleConfig:
+    # n_shards=6 -> 50 equities/shard, full 300-name coverage every hour.
+    # Relies on run_scan.py scanning each shard with 8-way concurrency
+    # (EQUITY_CONCURRENCY) - sequential scanning measured ~10s/ticker, which
+    # would make a 50-ticker shard alone take ~8 minutes. Parallelized, 10
+    # equities + BTC + ETH (crypto also parallelized, see data_deribit.py)
+    # measured 52s end-to-end; see the timeout-minutes comment in
+    # .github/workflows/scan.yml for the full extrapolation to production size.
     n_shards: int = 6
     shard_interval_minutes: int = 10
 

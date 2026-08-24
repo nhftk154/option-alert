@@ -34,10 +34,14 @@ class OptionContractRow:
 
     @property
     def notional_usd(self) -> float:
-        # Equities/ETFs: 1 contract = 100 shares. Deribit rows already fold this
-        # into `volume` (contracts are 1 unit of the coin), so this is scaled by
-        # the caller via a `contract_multiplier` when needed — see data_*.py.
-        return self.volume * self.underlying_price
+        # Dollar value of premium traded (the block/sweep-size proxy), not the
+        # notional value of shares/coins controlled.
+        # Equities/ETFs: 1 contract = 100 shares, priced at the option premium.
+        # Crypto (Deribit): premium is quoted in the coin itself, so volume is
+        # converted to USD via the index price instead of last_price.
+        if self.asset_class == AssetClass.CRYPTO:
+            return self.volume * self.underlying_price
+        return self.volume * 100 * self.last_price
 
 
 @dataclass

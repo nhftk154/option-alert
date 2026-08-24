@@ -25,10 +25,22 @@ class UniverseData:
 
 
 def fetch_sp500_symbols() -> list[str]:
-    """Scrape the current S&P 500 constituent list from Wikipedia (free, no key)."""
-    import pandas as pd
+    """Scrape the current S&P 500 constituent list from Wikipedia (free, no key).
 
-    tables = pd.read_html(WIKI_SP500_URL)
+    Wikipedia's edge (Wikimedia) returns 403 Forbidden to requests with no
+    User-Agent header, which is exactly what pandas.read_html sends by
+    default - so the page is fetched manually with a browser-like header
+    first, then handed to read_html as raw HTML."""
+    import io
+
+    import pandas as pd
+    import requests
+
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; option-alert/1.0)"}
+    resp = requests.get(WIKI_SP500_URL, headers=headers, timeout=15)
+    resp.raise_for_status()
+
+    tables = pd.read_html(io.StringIO(resp.text))
     constituents = tables[0]
     symbols = constituents["Symbol"].astype(str).str.replace(".", "-", regex=False)
     return symbols.tolist()

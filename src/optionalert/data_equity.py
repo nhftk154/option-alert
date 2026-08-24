@@ -54,11 +54,14 @@ def fetch_option_chain(ticker: str, max_dte: int | None = None) -> list[OptionCo
         chain = _with_retry(tk.option_chain, expiry_str)
         for kind, df in ((OptionKind.CALL, chain.calls), (OptionKind.PUT, chain.puts)):
             for _, r in df.iterrows():
-                volume = r.get("volume") or 0
-                oi = r.get("openInterest") or 0
+                volume = r.get("volume")
+                oi = r.get("openInterest")
                 iv = r.get("impliedVolatility")
-                if not volume or iv is None or math.isnan(iv):
+                if volume is None or math.isnan(volume) or not volume:
                     continue
+                if iv is None or math.isnan(iv):
+                    continue
+                oi = 0.0 if oi is None or math.isnan(oi) else oi
                 rows.append(OptionContractRow(
                     ticker=ticker,
                     asset_class=_asset_class_for(ticker),
