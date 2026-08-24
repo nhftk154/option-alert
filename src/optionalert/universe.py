@@ -1,7 +1,8 @@
 """Builds and caches the tracked ticker universe: top-N S&P 500 names by
-market cap, plus the fixed metals/crypto symbols. scan.yml only ever reads
-the committed cache (get_universe) — it never rebuilds it live."""
+market cap, plus the fixed metal/crypto ETF symbols. scan.yml only ever
+reads the committed cache (get_universe) — it never rebuilds it live."""
 
+import dataclasses
 import json
 import logging
 import os
@@ -20,8 +21,12 @@ WIKI_SP500_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 class UniverseData:
     equities: list  # market-cap sorted, largest first
     metals: list
-    crypto: list
     generated_at_utc: str
+    # Both default to None (not []) so a cache written before this field
+    # existed (or under its old name) still loads via load_universe_cache's
+    # unknown-key filtering, instead of a missing-required-argument crash on
+    # every scan.yml run until the next weekly refresh overwrites it.
+    crypto_etfs: list = None
     tvremix_symbols: dict = None  # ticker -> "EXCHANGE:TICKER"; empty/missing entries just mean run_scan.py skips tvremix refinement for that ticker
 
 
@@ -123,11 +128,12 @@ def build_universe(top_n: int | None = None) -> UniverseData:
     symbols = fetch_sp500_symbols()
     top = rank_by_market_cap(symbols, top_n)
     metals = list(CONFIG.universe.metals)
-    tvremix_symbols = resolve_tvremix_symbols(top + metals)
+    crypto_etfs = list(CONFIG.universe.crypto_etfs)
+    tvremix_symbols = resolve_tvremix_symbols(top + metals + crypto_etfs)
     return UniverseData(
         equities=top,
         metals=metals,
-        crypto=list(CONFIG.universe.crypto),
+        crypto_etfs=crypto_etfs,
         generated_at_utc=datetime.now(timezone.utc).isoformat(),
         tvremix_symbols=tvremix_symbols,
     )
@@ -140,9 +146,14 @@ def save_universe_cache(universe: UniverseData, path: str | None = None) -> None
 
 
 def load_universe_cache(path: str | None = None) -> UniverseData:
+    """Tolerates a cache written by an older schema version (e.g. before a
+    field was renamed/added) by dropping any key UniverseData no longer
+    has - the alternative is TypeError on every run_scan.py invocation
+    until refresh_universe.yml happens to overwrite the cache next."""
     path = path or CONFIG.universe.cache_path
     raw = json.loads(Path(path).read_text())
-    return UniverseData(**raw)
+    known_fields = {f.name for f in dataclasses.fields(UniverseData)}
+    return UniverseData(**{k: v for k, v in raw.items() if k in known_fields})
 
 
 def get_universe(path: str | None = None) -> UniverseData:

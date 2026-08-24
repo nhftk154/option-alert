@@ -55,10 +55,9 @@ class ScheduleConfig:
     # n_shards=6 -> 50 equities/shard, full 300-name coverage every hour.
     # Relies on run_scan.py scanning each shard with 8-way concurrency
     # (EQUITY_CONCURRENCY) - sequential scanning measured ~10s/ticker, which
-    # would make a 50-ticker shard alone take ~8 minutes. Parallelized, 10
-    # equities + BTC + ETH (crypto also parallelized, see data_deribit.py)
-    # measured 52s end-to-end; see the timeout-minutes comment in
-    # .github/workflows/scan.yml for the full extrapolation to production size.
+    # would make a 50-ticker shard alone take ~8 minutes. See the
+    # timeout-minutes comment in .github/workflows/scan.yml for the full
+    # extrapolation to production size.
     n_shards: int = 6
     shard_interval_minutes: int = 10
 
@@ -66,8 +65,13 @@ class ScheduleConfig:
 @dataclass(frozen=True)
 class UniverseConfig:
     sp_top_n: int = 300
-    metals: tuple = ("GLD", "SLV")
-    crypto: tuple = ("BTC", "ETH")
+    # Top-2 by real average dollar volume (measured live, not just AUM) -
+    # GLD/IAU and SLV/SIVR for gold/silver, IBIT/FBTC and ETHA/FETH for
+    # bitcoin/ethereum. All eight are plain equity-style ETFs with listed
+    # options, scanned through the exact same yfinance path as any other
+    # ticker - no separate crypto-native pipeline needed.
+    metals: tuple = ("GLD", "IAU", "SLV", "SIVR")
+    crypto_etfs: tuple = ("IBIT", "FBTC", "ETHA", "FETH")
     cache_path: str = "data/universe_cache.json"
     max_cache_age_days: int = 21
 

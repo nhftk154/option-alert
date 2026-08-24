@@ -3,15 +3,15 @@
 Used only as a corroborating IV/Greeks source for the single contract behind
 an alert that's already about to fire - tvremix doesn't expose options
 volume/open-interest at all (checked directly, see README known
-limitations), so it can never replace yfinance/Deribit as the primary data
-source, only refine the IV leg of the score right before sending.
+limitations), so it can never replace yfinance as the primary data source,
+only refine the IV leg of the score right before sending.
 
 Best-effort by design: TVREMIX_API_KEY is optional. Any missing key, network
 error, rate limit, or unexpected response shape just returns None, and
-callers fall back to the original (yfinance/Deribit) IV - exactly the
-behavior before this integration existed. This client is unverified against
-a real API key (none was available while writing it) and should be smoke-
-tested against a live key before being trusted.
+callers fall back to the original yfinance IV - exactly the behavior before
+this integration existed. Verified against a live key: auth and the
+tools/call request shape both work (resolve_symbol succeeded for 289/302
+real tickers during a live refresh_universe.yml run).
 """
 
 import itertools

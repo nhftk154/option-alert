@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from .config import CONFIG
 from .cooldown import CooldownState, is_on_cooldown, mark_alerted
-from .models import AssetClass, EquityVolumeAlert, OptionKind, ScoreResult
+from .models import EquityVolumeAlert, OptionKind, ScoreResult
 from .telegram_client import send_telegram_message
 
 
@@ -15,28 +15,19 @@ def severity_emoji(score: float) -> str:
     return "🔴" if score >= CONFIG.thresholds.severity_extreme else "🟡"
 
 
-def yahoo_option_chain_url(ticker: str, asset_class: AssetClass) -> str:
-    if asset_class == AssetClass.CRYPTO:
-        return f"https://www.deribit.com/{ticker.lower()}/options"
+def yahoo_option_chain_url(ticker: str) -> str:
     return f"https://finance.yahoo.com/quote/{ticker}/options"
 
 
 def build_alert_text_options(result: ScoreResult) -> str:
     emoji = severity_emoji(result.score)
     kind_letter = "C" if result.kind == OptionKind.CALL else "P"
-    link = yahoo_option_chain_url(result.ticker, result.asset_class)
+    link = yahoo_option_chain_url(result.ticker)
 
     # Signed distance from the current price - deliberately not labeled
     # ITM/OTM, since that sign flips between calls and puts and a plain
     # distance is unambiguous for both.
     distance_pct = (result.strike - result.underlying_price) / result.underlying_price * 100
-
-    # Deribit premiums are coin-denominated; equities/metals are already USD.
-    avg_fill_usd = (
-        result.last_price * result.underlying_price
-        if result.asset_class == AssetClass.CRYPTO
-        else result.last_price
-    )
 
     return (
         f"{emoji} Hot Contract: {result.ticker}\n"
@@ -47,7 +38,7 @@ def build_alert_text_options(result: ScoreResult) -> str:
         f"Vol/OI: {result.vol_oi_ratio:.1f}x\n"
         f"Distance from price: {distance_pct:+.0f}%\n"
         f"Premium: ${result.notional_usd:,.0f}\n"
-        f"Last Fill: ${avg_fill_usd:,.2f}\n"
+        f"Last Fill: ${result.last_price:,.2f}\n"
         f"IV: {result.iv * 100:.0f}% vs baseline {result.baseline_vol * 100:.0f}%\n"
         f"Anomaly Score: {result.score:.0f}/100\n"
         f"\n"

@@ -1,18 +1,16 @@
 """Entrypoint for scan.yml. Full flow: market-hours gate -> load universe from
 cache -> pick this run's shard -> read Sheet cooldown state -> scan equities +
-metals + crypto (in parallel, see below) -> filter through cooldown -> send
-survivors -> one batched write each to History and Cooldown.
+metal/crypto ETFs (one thread pool, see below) -> filter through cooldown ->
+send survivors -> one batched write each to History and Cooldown.
 
 Supports `--dry-run` (print instead of send/write) and `--tickers` (bypass
 sharding, scan an explicit list) for manual workflow_dispatch testing.
 
-Concurrency note: fetching each ticker/currency is independent network I/O,
-so both the equity batch and the crypto batch are scanned with a thread pool
-(data_deribit.py additionally parallelizes internally, since a single crypto
-currency can involve hundreds of individual Deribit instrument-ticker calls).
-Measured before parallelizing: ~10s/equity ticker, ~174s for one crypto
-currency (Deribit) - sequential scanning of a realistic shard would blow past
-any reasonable GitHub Actions job timeout. `cooldown_state` and
+Concurrency note: fetching each ticker is independent network I/O, so the
+whole batch (equities + metal ETFs + crypto-linked ETFs - all plain yfinance
+tickers, see universe.py) is scanned with one thread pool. Measured: ~10s/
+ticker sequentially, which would make a 50-ticker shard alone take ~8
+minutes - parallelized to 8 workers instead. `cooldown_state` and
 `history_buffer` are mutated from multiple worker threads, so every write to
 them goes through `_alert_lock`.
 """
@@ -28,7 +26,6 @@ from . import tvremix_client
 from .alerts import build_alert_text_equity_volume, build_alert_text_options, send_alert_if_not_cooling
 from .config import CONFIG
 from .cooldown import flush_cooldown_state, load_cooldown_state
-from .data_deribit import fetch_deribit_historical_volatility, get_deribit_option_chain
 from .data_equity import fetch_option_chain, fetch_underlying_snapshot
 from .equity_volume import check_equity_volume_anomaly
 from .market_hours import is_nyse_open
@@ -42,7 +39,6 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 EQUITY_CONCURRENCY = 8  # moderate - yfinance is an unofficial/fragile scraper
-CRYPTO_CONCURRENCY = 2  # BTC + ETH; each already parallelizes internally
 
 
 def parse_args():
@@ -124,25 +120,6 @@ def scan_equity_symbol(ticker, now, cooldown_state, alert_lock, dry_run, history
         _record_alert_if_due(ticker, "EQUITY_VOLUME", text, rec, cooldown_state, alert_lock, now, dry_run, history_buffer)
 
 
-def scan_crypto_symbol(currency, now, cooldown_state, alert_lock, dry_run, history_buffer):
-    baseline_vol = fetch_deribit_historical_volatility(currency)
-    rows = get_deribit_option_chain(currency)
-    if not rows:
-        return
-
-    results = score_option_chain(rows, baseline_vol=baseline_vol)
-    for result in results:
-        text = build_alert_text_options(result)
-        rec = AlertRecord(
-            timestamp_utc=now.isoformat(), ticker=result.ticker,
-            asset_class=result.asset_class.value, kind=result.kind.value,
-            score=result.score, sub_vol_oi=result.sub_vol_oi, sub_iv=result.sub_iv,
-            sub_block=result.sub_block, strike=result.strike,
-            expiry=result.expiry.isoformat(), notional_usd=result.notional_usd,
-        )
-        _record_alert_if_due(result.ticker, result.kind.value, text, rec, cooldown_state, alert_lock, now, dry_run, history_buffer)
-
-
 def _run_pool(fn, items, max_workers, *extra_args):
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {pool.submit(fn, item, *extra_args): item for item in items}
@@ -166,11 +143,11 @@ def main() -> int:
 
     if override_tickers:
         # Manual smoke-test path: doesn't need the committed universe cache to
-        # exist yet, only the fixed crypto list from config. Still tries to
+        # exist yet, but still always covers metals/crypto ETFs too (cheap -
+        # they're plain tickers now, no separate slow pipeline), and tries to
         # load tvremix_symbols from the cache if it does exist, purely so
         # manual --tickers test runs can also exercise tvremix refinement.
-        equity_batch = override_tickers
-        crypto_batch = list(CONFIG.universe.crypto)
+        equity_batch = override_tickers + list(CONFIG.universe.metals) + list(CONFIG.universe.crypto_etfs)
         try:
             tvremix_symbols = get_universe().tvremix_symbols or {}
         except Exception:
@@ -179,10 +156,12 @@ def main() -> int:
         universe = get_universe()
         shard_index = get_shard_index(now, CONFIG.schedule.n_shards, CONFIG.schedule.shard_interval_minutes)
         shard = select_shard(universe.equities, shard_index, CONFIG.schedule.n_shards)
-        equity_batch = shard + universe.metals
-        crypto_batch = universe.crypto
+        equity_batch = shard + universe.metals + (universe.crypto_etfs or [])
         tvremix_symbols = universe.tvremix_symbols or {}
-        logger.info("shard %d/%d: %d equities + %d metals", shard_index, CONFIG.schedule.n_shards, len(shard), len(universe.metals))
+        logger.info(
+            "shard %d/%d: %d equities + %d metals + %d crypto ETFs",
+            shard_index, CONFIG.schedule.n_shards, len(shard), len(universe.metals), len(universe.crypto_etfs or []),
+        )
 
     try:
         spreadsheet = open_spreadsheet()
@@ -195,13 +174,7 @@ def main() -> int:
     history_buffer: list[list] = []
     alert_lock = threading.Lock()
 
-    # Equities (yfinance) and crypto (Deribit) hit different hosts, so run
-    # both pools concurrently rather than one after the other.
-    with ThreadPoolExecutor(max_workers=2) as top_pool:
-        equity_future = top_pool.submit(_run_pool, scan_equity_symbol, equity_batch, EQUITY_CONCURRENCY, now, cooldown_state, alert_lock, args.dry_run, history_buffer, tvremix_symbols)
-        crypto_future = top_pool.submit(_run_pool, scan_crypto_symbol, crypto_batch, CRYPTO_CONCURRENCY, now, cooldown_state, alert_lock, args.dry_run, history_buffer)
-        equity_future.result()
-        crypto_future.result()
+    _run_pool(scan_equity_symbol, equity_batch, EQUITY_CONCURRENCY, now, cooldown_state, alert_lock, args.dry_run, history_buffer, tvremix_symbols)
 
     logger.info("run complete: %d alerts sent", len(history_buffer))
 

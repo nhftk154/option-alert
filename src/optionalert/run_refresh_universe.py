@@ -15,8 +15,8 @@ def main() -> int:
     logger.info("building S&P universe by market cap...")
     universe = build_universe()
     logger.info(
-        "universe built: %d equities, %d metals, %d crypto",
-        len(universe.equities), len(universe.metals), len(universe.crypto),
+        "universe built: %d equities, %d metals, %d crypto ETFs, %d tvremix symbols resolved",
+        len(universe.equities), len(universe.metals), len(universe.crypto_etfs or []), len(universe.tvremix_symbols or {}),
     )
     if len(universe.equities) < 100:
         logger.error("only %d equities resolved - refusing to overwrite cache", len(universe.equities))

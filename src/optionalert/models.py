@@ -1,5 +1,6 @@
-"""Shared data shapes. data_equity.py and data_deribit.py both normalize into
-these so scoring.py never needs to know which source a row came from."""
+"""Shared data shapes that data_equity.py normalizes every ticker (equity,
+metal ETF, or crypto-linked ETF) into, so scoring.py never needs to know
+which kind of ticker a row came from."""
 
 from dataclasses import dataclass
 from datetime import date
@@ -14,7 +15,7 @@ class OptionKind(str, Enum):
 class AssetClass(str, Enum):
     EQUITY = "EQUITY"
     METAL_ETF = "METAL_ETF"
-    CRYPTO = "CRYPTO"
+    CRYPTO_ETF = "CRYPTO_ETF"
 
 
 @dataclass
@@ -35,16 +36,10 @@ class OptionContractRow:
     @property
     def notional_usd(self) -> float:
         # Dollar value of premium traded (the block/sweep-size proxy), not the
-        # notional value of shares/coins controlled.
-        # Equities/ETFs: 1 contract = 100 shares, priced at the option premium.
-        # Crypto (Deribit): premium is quoted in the coin itself (last_price is
-        # in BTC/ETH, not USD), so it's converted via the index price on top of
-        # last_price - dropping last_price here (as a prior version of this
-        # code did) computes the notional value of coins controlled instead of
-        # the premium paid, off by orders of magnitude for anything not deep
-        # ITM.
-        if self.asset_class == AssetClass.CRYPTO:
-            return self.volume * self.last_price * self.underlying_price
+        # notional value of shares/coins controlled. 1 contract = 100 shares,
+        # priced at the option premium - true for equities and every ETF
+        # (metal or crypto-linked) alike, since they're all standard
+        # exchange-listed options quoted in USD.
         return self.volume * 100 * self.last_price
 
 

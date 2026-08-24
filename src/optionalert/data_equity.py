@@ -31,7 +31,11 @@ def _with_retry(fn, *args, **kwargs):
 
 
 def _asset_class_for(ticker: str) -> AssetClass:
-    return AssetClass.METAL_ETF if ticker in CONFIG.universe.metals else AssetClass.EQUITY
+    if ticker in CONFIG.universe.metals:
+        return AssetClass.METAL_ETF
+    if ticker in CONFIG.universe.crypto_etfs:
+        return AssetClass.CRYPTO_ETF
+    return AssetClass.EQUITY
 
 
 def fetch_option_chain(ticker: str, max_dte: int | None = None) -> list[OptionContractRow]:

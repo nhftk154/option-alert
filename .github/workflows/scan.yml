@@ -28,13 +28,12 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    # Measured after parallelizing (8-way concurrency for both the equity
-    # batch and each Deribit crypto currency, see run_scan.py/data_deribit.py):
-    # 10 equities + BTC + ETH completed in 52s. Extrapolated to a full
-    # production shard (50 equities, same crypto cost since it's fixed at 2
-    # currencies regardless of shard size) that's ~2-3 min worst case, plus
-    # ~30-40s of checkout/setup/pip-install overhead -> ~3-4 min realistic.
-    # 8 minutes leaves ~2-3x headroom for a slower run on the shared runner.
+    # Measured after parallelizing (8-way concurrency, see run_scan.py):
+    # 10 tickers completed in 52s. Extrapolated to a full production shard
+    # (50 equities + 4 metal ETFs + 4 crypto ETFs) that's ~2-3 min worst
+    # case, plus ~30-40s of checkout/setup/pip-install overhead -> ~3-4 min
+    # realistic. 8 minutes leaves ~2-3x headroom for a slower run on the
+    # shared runner.
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4

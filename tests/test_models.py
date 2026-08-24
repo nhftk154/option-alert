@@ -22,23 +22,15 @@ def make_row(**overrides) -> OptionContractRow:
     return OptionContractRow(**defaults)
 
 
-def test_equity_notional_is_volume_times_multiplier_times_premium():
+def test_notional_is_volume_times_multiplier_times_premium():
     row = make_row(volume=1000.0, last_price=5.0)
     assert row.notional_usd == 1000.0 * 100 * 5.0
 
 
-def test_crypto_notional_is_premium_not_underlying_notional():
-    # Deribit quotes last_price in the coin itself (e.g. 0.02 BTC), not USD -
-    # the premium in USD needs both last_price and the index price. Dropping
-    # last_price computes the notional value of coins controlled instead,
-    # which is orders of magnitude larger for anything not deep ITM.
-    row = make_row(
-        asset_class=AssetClass.CRYPTO,
-        volume=504.0,
-        last_price=0.0011,  # BTC-denominated premium per contract
-        underlying_price=78_824.0,  # USD index price
-    )
-    expected_premium = 504.0 * 0.0011 * 78_824.0
-    assert row.notional_usd == expected_premium
-    # sanity: nowhere near the (wrong) volume*underlying_price figure
-    assert row.notional_usd < row.volume * row.underlying_price / 100
+def test_notional_formula_is_the_same_for_every_asset_class():
+    # All tracked tickers (equities, metal ETFs, crypto-linked ETFs) are
+    # plain USD-quoted exchange-listed options - there's no per-asset-class
+    # unit conversion needed, unlike a raw crypto-native venue would require.
+    for asset_class in AssetClass:
+        row = make_row(asset_class=asset_class, volume=1000.0, last_price=5.0)
+        assert row.notional_usd == 1000.0 * 100 * 5.0
