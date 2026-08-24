@@ -20,8 +20,11 @@ jobs:
     # forcibly cancellable, so the true worst case is still bounded by
     # yfinance's own timeout, not by us. 25 minutes covers that plus room for
     # more than one straggler; this job only runs once a week, so a longer
-    # ceiling costs nothing.
-    timeout-minutes: 25
+    # ceiling costs nothing. tvremix symbol resolution (universe.py's
+    # resolve_tvremix_symbols) adds up to ~300 tickers * 3.5s pacing
+    # (~18 min) on top of that when TVREMIX_API_KEY is set - 45 minutes
+    # covers both worst cases with room to spare.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -34,6 +37,7 @@ jobs:
 
       - name: Build universe cache
         env:
+          TVREMIX_API_KEY: ${{ secrets.TVREMIX_API_KEY }}
           PYTHONPATH: src
         run: python -m optionalert.run_refresh_universe
 

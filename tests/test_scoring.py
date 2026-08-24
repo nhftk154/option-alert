@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 
 from optionalert.models import AssetClass, OptionContractRow, OptionKind
-from optionalert.scoring import score_contract, score_option_chain
+from optionalert.scoring import rescore_with_iv, score_contract, score_option_chain
 
 
 def make_row(**overrides) -> OptionContractRow:
@@ -70,3 +70,16 @@ def test_score_option_chain_filters_below_threshold():
     rows = [make_row(volume=1001, open_interest=1000, iv=0.21)]  # barely above notional, weak signal
     results = score_option_chain(rows, baseline_vol=0.20)
     assert results == []
+
+
+def test_rescore_with_iv_only_changes_iv_leg():
+    row = make_row(volume=5000, open_interest=100, iv=0.80)
+    original = score_contract(row, baseline_vol=0.20)
+
+    rescored = rescore_with_iv(original, new_iv=0.20)  # tvremix says: no spike at all
+
+    assert rescored.iv == 0.20
+    assert rescored.sub_iv == 0.0
+    assert rescored.sub_vol_oi == original.sub_vol_oi  # unaffected
+    assert rescored.sub_block == original.sub_block  # unaffected
+    assert rescored.score < original.score

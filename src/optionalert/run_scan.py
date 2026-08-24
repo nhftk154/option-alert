@@ -24,6 +24,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+from . import tvremix_client
 from .alerts import build_alert_text_equity_volume, build_alert_text_options, send_alert_if_not_cooling
 from .config import CONFIG
 from .cooldown import flush_cooldown_state, load_cooldown_state
@@ -32,7 +33,7 @@ from .data_equity import fetch_option_chain, fetch_underlying_snapshot
 from .equity_volume import check_equity_volume_anomaly
 from .market_hours import is_nyse_open
 from .models import AlertRecord
-from .scoring import score_option_chain
+from .scoring import rescore_with_iv, score_option_chain
 from .sharding import get_shard_index, select_shard
 from .sheets_client import append_history_rows, open_spreadsheet
 from .universe import get_universe
@@ -70,13 +71,31 @@ def _record_alert_if_due(ticker, kind, text, rec, cooldown_state, alert_lock, no
     return sent
 
 
-def scan_equity_symbol(ticker, now, cooldown_state, alert_lock, dry_run, history_buffer):
+def _refine_with_tvremix(result, tvremix_symbol):
+    """Corroborates the IV leg with tvremix (more reliable than yfinance's,
+    see README) for the one contract that's about to alert. Best-effort:
+    returns the original result unchanged on any miss - tvremix doesn't
+    carry volume/OI at all, so it can never be a hard dependency here."""
+    if not tvremix_symbol:
+        return result
+    new_iv = tvremix_client.refine_iv(
+        tvremix_symbol, result.expiry.isoformat(), result.strike, result.kind.value.lower(),
+    )
+    if new_iv is None:
+        return result
+    return rescore_with_iv(result, new_iv)
+
+
+def scan_equity_symbol(ticker, now, cooldown_state, alert_lock, dry_run, history_buffer, tvremix_symbols):
     snapshot = fetch_underlying_snapshot(ticker)
 
     rows = fetch_option_chain(ticker)
     if rows:
         results = score_option_chain(rows, baseline_vol=snapshot.realized_vol_20d)
         for result in results:
+            result = _refine_with_tvremix(result, tvremix_symbols.get(ticker))
+            if result.score < CONFIG.thresholds.alert_score_threshold:
+                continue  # tvremix's IV pulled it back under the bar - skip, don't send
             text = build_alert_text_options(result)
             rec = AlertRecord(
                 timestamp_utc=now.isoformat(), ticker=result.ticker,
@@ -143,12 +162,14 @@ def main() -> int:
         # exist yet, only the fixed crypto list from config.
         equity_batch = override_tickers
         crypto_batch = list(CONFIG.universe.crypto)
+        tvremix_symbols = {}
     else:
         universe = get_universe()
         shard_index = get_shard_index(now, CONFIG.schedule.n_shards, CONFIG.schedule.shard_interval_minutes)
         shard = select_shard(universe.equities, shard_index, CONFIG.schedule.n_shards)
         equity_batch = shard + universe.metals
         crypto_batch = universe.crypto
+        tvremix_symbols = universe.tvremix_symbols or {}
         logger.info("shard %d/%d: %d equities + %d metals", shard_index, CONFIG.schedule.n_shards, len(shard), len(universe.metals))
 
     try:
@@ -165,7 +186,7 @@ def main() -> int:
     # Equities (yfinance) and crypto (Deribit) hit different hosts, so run
     # both pools concurrently rather than one after the other.
     with ThreadPoolExecutor(max_workers=2) as top_pool:
-        equity_future = top_pool.submit(_run_pool, scan_equity_symbol, equity_batch, EQUITY_CONCURRENCY, now, cooldown_state, alert_lock, args.dry_run, history_buffer)
+        equity_future = top_pool.submit(_run_pool, scan_equity_symbol, equity_batch, EQUITY_CONCURRENCY, now, cooldown_state, alert_lock, args.dry_run, history_buffer, tvremix_symbols)
         crypto_future = top_pool.submit(_run_pool, scan_crypto_symbol, crypto_batch, CRYPTO_CONCURRENCY, now, cooldown_state, alert_lock, args.dry_run, history_buffer)
         equity_future.result()
         crypto_future.result()

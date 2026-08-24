@@ -20,6 +20,12 @@
   כל הכיוונון נעשה שם, בלי לגעת בשאר הקוד.
 - `eod_report.yml` שולח מייל יומי אחרי סגירת המסחר עם כל התנועות של היום + גרפים.
 - `refresh_universe.yml` מרענן שבועית (שבת) את רשימת 300 המניות.
+- **tvremix (אופציונלי)**: `yfinance` לא מזהה חוזים שלא נסחרו היום (מציג
+  volume/IV ישנים בלי לסמן שהם ישנים — ראו `src/optionalert/data_equity.py`),
+  אז ה-IV שלו לפעמים לא אמין. אם מוגדר `TVREMIX_API_KEY`, המערכת שולפת IV
+  מאומת מ-tvremix (ה-MCP הרשמי של TradingView) לחוזה הבודד שכבר עומד
+  להתריע, לפני השליחה בפועל — לא בשימוש ל-volume/OI (tvremix לא חושף את
+  זה בכלל). בלי ה-secret הזה המערכת ממשיכה לעבוד בדיוק כמו קודם.
 
 ## הקמה חד-פעמית
 
@@ -45,6 +51,7 @@
    | `GOOGLE_SHEET_ID` | מהשלב 3 |
    | `EMAIL_ADDRESS` | כתובת ה-Gmail ששולחת/מקבלת את הדוח |
    | `EMAIL_APP_PASSWORD` | מהשלב 4 |
+   | `TVREMIX_API_KEY` | אופציונלי — `tvremix.xyz` → Account → API Keys → צרו טוקן (`tvr_...`) |
 
 6. הריצו ידנית את `refresh_universe.yml` (Actions tab → workflow → Run workflow)
    כדי ליצור את `data/universe_cache.json` לפני שמסתמכים על `scan.yml`.
@@ -77,3 +84,8 @@ PYTHONPATH=src python -m optionalert.run_scan --dry-run --tickers AAPL,MSFT,GLD
   עסקת בלוק בודדת.
 - נפח המניה של "היום" מושווה לממוצע יומי מלא של 20 יום, כך שמוקדם ביום המסחר
   היחס עלול להיראות נמוך יותר ממה שהוא בפועל.
+- שילוב tvremix (`src/optionalert/tvremix_client.py`) נכתב מול תיעוד ה-MCP
+  שלהם (JSON-RPC מעל HTTP), לא נבדק מול מפתח אמיתי בפועל — נדרשת בדיקה חיה
+  (`--dry-run --tickers`) אחרי הוספת `TVREMIX_API_KEY` כדי לוודא שהפרסור
+  של התשובה תואם. נכשל בשקט (מדלג על השיפור) אם הפורמט לא תואם — לא מפיל
+  את הסריקה.

@@ -4,6 +4,7 @@ the committed cache (get_universe) — it never rebuilds it live."""
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -21,6 +22,7 @@ class UniverseData:
     metals: list
     crypto: list
     generated_at_utc: str
+    tvremix_symbols: dict = None  # ticker -> "EXCHANGE:TICKER"; empty/missing entries just mean run_scan.py skips tvremix refinement for that ticker
 
 
 def fetch_sp500_symbols() -> list[str]:
@@ -90,15 +92,44 @@ def rank_by_market_cap(symbols: list[str], top_n: int) -> list[str]:
     return [sym for sym, _ in ranked[:top_n]]
 
 
+_TVREMIX_PACE_SECONDS = 3.5  # tvremix's own limit is 20/min; this keeps a margin
+
+
+def resolve_tvremix_symbols(tickers: list[str]) -> dict:
+    """Best-effort ticker -> 'EXCHANGE:TICKER' resolution for tvremix, paced
+    to stay under its rate limit. No-ops immediately (no network calls) if
+    TVREMIX_API_KEY isn't set - resolve_symbol() returns None for every
+    ticker right away in that case. Only runs in the weekly refresh job, not
+    the frequent scan job, precisely because this is slow at 300 tickers."""
+    import time
+
+    from . import tvremix_client
+
+    if not os.environ.get("TVREMIX_API_KEY"):
+        return {}
+
+    resolved = {}
+    for i, ticker in enumerate(tickers):
+        symbol = tvremix_client.resolve_symbol(ticker)
+        if symbol:
+            resolved[ticker] = symbol
+        if i < len(tickers) - 1:
+            time.sleep(_TVREMIX_PACE_SECONDS)
+    return resolved
+
+
 def build_universe(top_n: int | None = None) -> UniverseData:
     top_n = top_n or CONFIG.universe.sp_top_n
     symbols = fetch_sp500_symbols()
     top = rank_by_market_cap(symbols, top_n)
+    metals = list(CONFIG.universe.metals)
+    tvremix_symbols = resolve_tvremix_symbols(top + metals)
     return UniverseData(
         equities=top,
-        metals=list(CONFIG.universe.metals),
+        metals=metals,
         crypto=list(CONFIG.universe.crypto),
         generated_at_utc=datetime.now(timezone.utc).isoformat(),
+        tvremix_symbols=tvremix_symbols,
     )
 
 
