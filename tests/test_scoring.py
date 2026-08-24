@@ -33,11 +33,18 @@ def test_dte_out_of_range_is_rejected():
     assert score_contract(row, baseline_vol=0.20) is None
 
 
-def test_open_interest_zero_does_not_crash():
-    row = make_row(open_interest=0.0)
-    result = score_contract(row, baseline_vol=0.20)
-    assert result is not None
-    assert result.vol_oi_ratio == 1000.0  # divides by max(oi, 1)
+def test_zero_dte_is_rejected():
+    # OI only updates once/day while volume accrues intraday, so 0DTE
+    # vol/oi ratios are routinely inflated and not a real signal.
+    row = make_row(dte=0, volume=5000, open_interest=100, iv=0.80)
+    assert score_contract(row, baseline_vol=0.20) is None
+
+
+def test_open_interest_below_floor_is_rejected():
+    # Near-zero OI on illiquid strikes is a noisy denominator, not a signal -
+    # yfinance reports OI=0/1 routinely on far ITM/OTM legs.
+    row = make_row(open_interest=1.0)
+    assert score_contract(row, baseline_vol=0.20) is None
 
 
 def test_high_vol_oi_and_iv_spike_scores_high():

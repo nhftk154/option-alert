@@ -13,8 +13,23 @@ class ScoringWeights:
 
 @dataclass(frozen=True)
 class Thresholds:
-    min_notional_usd: float = 100_000
+    min_notional_usd: float = 500_000
     max_dte: int = 45
+    # Contracts expiring today (dte=0) are excluded from scoring: Open Interest
+    # only updates once per day (previous close) while volume accrues live
+    # intraday, so same-day contracts show routinely inflated vol/oi ratios
+    # (measured: 20x-40x on ordinary 0DTE trading, not real anomalies).
+    min_dte: int = 1
+    # Contracts below this Open Interest are excluded entirely, not just
+    # floored to 1. Measured live: yfinance reports OI=0/1 for illiquid far
+    # ITM/OTM strikes on essentially every chain, each with its own noisy IV
+    # quote; score_option_chain() keeps the single highest-scoring contract
+    # per ticker, so out of 100+ strikes in a chain, one of these near-zero-OI
+    # junk quotes was *always* winning and saturating both the vol/oi and IV
+    # subscores - producing near-universal 90-100 scores regardless of any
+    # cap tuning. A floor removes the degenerate low-OI denominator instead
+    # of just capping its effect.
+    min_open_interest: float = 50
     # Score (0-100) above which a Telegram alert fires. Start at 70; the plan is
     # to retune this after ~1 week of live data once the History sheet has a
     # score distribution to look at.
@@ -22,12 +37,12 @@ class Thresholds:
     # Score above which the alert gets the "extreme" red emoji instead of yellow.
     severity_extreme: float = 85
     # Volume/OpenInterest ratio that saturates the vol/oi subscore to 100.
-    vol_oi_cap_ratio: float = 5.0
+    vol_oi_cap_ratio: float = 12.0
     # (IV - baseline_vol) / baseline_vol ratio that saturates the IV subscore to 100.
     iv_spike_cap_ratio: float = 1.0
     # Log-scale floor/cap (USD notional) for the block/sweep-size subscore.
     block_notional_floor_usd: float = 100_000
-    block_notional_cap_usd: float = 1_000_000
+    block_notional_cap_usd: float = 3_000_000
     # Stock (equity) volume vs its own 20-day average that counts as "unusual".
     equity_volume_multiplier: float = 3.0
     equity_volume_lookback_days: int = 20

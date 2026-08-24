@@ -18,7 +18,9 @@ def score_contract(row: OptionContractRow, baseline_vol: float) -> ScoreResult |
     notional = row.notional_usd
     if notional < thresholds.min_notional_usd:
         return None
-    if row.dte < 0 or row.dte > thresholds.max_dte:
+    if row.dte < thresholds.min_dte or row.dte > thresholds.max_dte:
+        return None
+    if row.open_interest < thresholds.min_open_interest:
         return None
 
     vol_oi_ratio = row.volume / max(row.open_interest, 1)
