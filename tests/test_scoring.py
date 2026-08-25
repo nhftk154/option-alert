@@ -75,7 +75,7 @@ def test_score_option_chain_filters_below_threshold():
 def test_rescore_with_iv_only_changes_iv_leg():
     row = make_row(volume=5000, open_interest=100, iv=0.80)
     original = score_contract(row, baseline_vol=0.20)
-    assert original.iv_corroborated is False  # raw yfinance IV, not yet confirmed
+    assert original.iv_source == "yfinance"  # raw yfinance IV, no bid/ask to solve from
 
     rescored = rescore_with_iv(original, new_iv=0.20)  # tvremix says: no spike at all
 
@@ -84,4 +84,16 @@ def test_rescore_with_iv_only_changes_iv_leg():
     assert rescored.sub_vol_oi == original.sub_vol_oi  # unaffected
     assert rescored.sub_block == original.sub_block  # unaffected
     assert rescored.score < original.score
-    assert rescored.iv_corroborated is True
+    assert rescored.iv_source == "tvremix"
+
+
+def test_score_contract_prefers_bs_mid_iv_over_raw_yfinance_iv():
+    # iv=0.80 is what yfinance reports, but a tight bid/ask around a price
+    # consistent with much lower vol should make the local Black-Scholes
+    # solve override it - this is the actual TSLA-alert bug this guards
+    # against (yfinance's raw IV inflated relative to the market's own quote).
+    row = make_row(volume=5000, open_interest=100, iv=0.80, bid=4.90, ask=5.10)
+    result = score_contract(row, baseline_vol=0.20)
+    assert result is not None
+    assert result.iv_source == "bs_mid"
+    assert result.iv != 0.80

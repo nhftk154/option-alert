@@ -77,6 +77,10 @@ def fetch_option_chain(ticker: str, max_dte: int | None = None) -> list[OptionCo
                 if last_trade.tz_convert(NY_TZ).date() != today_ny:
                     continue
                 oi = 0.0 if oi is None or math.isnan(oi) else oi
+                bid = r.get("bid")
+                ask = r.get("ask")
+                bid = float(bid) if bid is not None and not math.isnan(bid) and bid > 0 else None
+                ask = float(ask) if ask is not None and not math.isnan(ask) and ask > 0 else None
                 rows.append(OptionContractRow(
                     ticker=ticker,
                     asset_class=_asset_class_for(ticker),
@@ -90,6 +94,8 @@ def fetch_option_chain(ticker: str, max_dte: int | None = None) -> list[OptionCo
                     iv=float(iv),
                     underlying_price=float(underlying_price),
                     contract_id=str(r.get("contractSymbol", "")),
+                    bid=bid,
+                    ask=ask,
                 ))
         time.sleep(random.uniform(0.3, 0.8))  # gentle pacing between expirations
 

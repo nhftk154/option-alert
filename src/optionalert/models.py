@@ -32,6 +32,8 @@ class OptionContractRow:
     iv: float  # implied volatility, as a decimal fraction e.g. 0.45 = 45%
     underlying_price: float
     contract_id: str
+    bid: float | None = None
+    ask: float | None = None
 
     @property
     def notional_usd(self) -> float:
@@ -72,7 +74,7 @@ class ScoreResult:
     open_interest: float
     last_price: float
     underlying_price: float
-    iv_corroborated: bool = False
+    iv_source: str = "yfinance"  # "yfinance" | "bs_mid" | "tvremix"
 
 
 @dataclass

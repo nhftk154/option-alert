@@ -4,6 +4,7 @@ easy to unit test with synthetic OptionContractRow fixtures."""
 import dataclasses
 import math
 
+from . import bs_iv
 from .config import CONFIG
 from .models import OptionContractRow, ScoreResult
 
@@ -33,7 +34,14 @@ def score_contract(row: OptionContractRow, baseline_vol: float) -> ScoreResult |
     vol_oi_ratio = row.volume / max(row.open_interest, 1)
     sub_vol_oi = _clamp(vol_oi_ratio / thresholds.vol_oi_cap_ratio * 100)
 
-    sub_iv = _sub_iv(row.iv, baseline_vol)
+    iv, iv_source = row.iv, "yfinance"
+    if row.bid is not None and row.ask is not None:
+        mid = (row.bid + row.ask) / 2
+        local_iv = bs_iv.implied_vol(mid, row.underlying_price, row.strike, row.dte, row.kind)
+        if local_iv is not None:
+            iv, iv_source = local_iv, "bs_mid"
+
+    sub_iv = _sub_iv(iv, baseline_vol)
 
     floor = thresholds.block_notional_floor_usd
     cap = thresholds.block_notional_cap_usd
@@ -58,7 +66,8 @@ def score_contract(row: OptionContractRow, baseline_vol: float) -> ScoreResult |
         expiry=row.expiry,
         notional_usd=notional,
         vol_oi_ratio=vol_oi_ratio,
-        iv=row.iv,
+        iv=iv,
+        iv_source=iv_source,
         baseline_vol=baseline_vol,
         dte=row.dte,
         volume=row.volume,
@@ -75,7 +84,7 @@ def rescore_with_iv(result: ScoreResult, new_iv: float) -> ScoreResult:
     weights = CONFIG.scoring_weights
     sub_iv = _sub_iv(new_iv, result.baseline_vol)
     composite = weights.vol_oi * result.sub_vol_oi + weights.iv_spike * sub_iv + weights.block_sweep * result.sub_block
-    return dataclasses.replace(result, iv=new_iv, sub_iv=sub_iv, score=composite, iv_corroborated=True)
+    return dataclasses.replace(result, iv=new_iv, sub_iv=sub_iv, score=composite, iv_source="tvremix")
 
 
 def score_option_chain(rows: list[OptionContractRow], baseline_vol: float) -> list[ScoreResult]:

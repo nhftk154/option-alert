@@ -30,11 +30,12 @@ def build_alert_text_options(result: ScoreResult) -> str:
     distance_pct = (result.strike - result.underlying_price) / result.underlying_price * 100
 
     iv_line = f"IV: {result.iv * 100:.0f}% vs baseline {result.baseline_vol * 100:.0f}%"
-    if not result.iv_corroborated:
-        # tvremix didn't confirm this IV before send - it's raw, unvalidated
-        # yfinance data, which can diverge sharply from the real market IV
-        # (see README known limitations). Flag it so recipients don't take
-        # the Anomaly Score at face value without a manual cross-check.
+    if result.iv_source == "yfinance":
+        # Neither the local bid/ask mid-quote solve nor tvremix produced a
+        # number - this is yfinance's own often-stale impliedVolatility
+        # field, which can diverge sharply from the real market IV (see
+        # README known limitations). Flag it so recipients don't take the
+        # Anomaly Score at face value without a manual cross-check.
         iv_line += "  (yfinance, unverified)"
 
     return (
