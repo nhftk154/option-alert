@@ -111,6 +111,7 @@ def resolve_tvremix_symbols(tickers: list[str]) -> dict:
     from . import tvremix_client
 
     if not os.environ.get("TVREMIX_API_KEY"):
+        logger.warning("TVREMIX_API_KEY not set - skipping tvremix symbol resolution entirely")
         return {}
 
     resolved = {}

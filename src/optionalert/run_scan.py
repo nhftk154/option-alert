@@ -163,6 +163,13 @@ def main() -> int:
             shard_index, CONFIG.schedule.n_shards, len(shard), len(universe.metals), len(universe.crypto_etfs or []),
         )
 
+    resolved = len(tvremix_symbols)
+    total = len(equity_batch)
+    if resolved == 0:
+        logger.warning("tvremix corroboration unavailable this run: 0/%d tickers resolved - check TVREMIX_API_KEY", total)
+    else:
+        logger.info("tvremix corroboration available for %d/%d tickers this run", resolved, total)
+
     try:
         spreadsheet = open_spreadsheet()
         cooldown_state = load_cooldown_state(spreadsheet)

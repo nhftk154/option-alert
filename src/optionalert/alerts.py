@@ -29,6 +29,14 @@ def build_alert_text_options(result: ScoreResult) -> str:
     # distance is unambiguous for both.
     distance_pct = (result.strike - result.underlying_price) / result.underlying_price * 100
 
+    iv_line = f"IV: {result.iv * 100:.0f}% vs baseline {result.baseline_vol * 100:.0f}%"
+    if not result.iv_corroborated:
+        # tvremix didn't confirm this IV before send - it's raw, unvalidated
+        # yfinance data, which can diverge sharply from the real market IV
+        # (see README known limitations). Flag it so recipients don't take
+        # the Anomaly Score at face value without a manual cross-check.
+        iv_line += "  (yfinance, unverified)"
+
     return (
         f"{emoji} Hot Contract: {result.ticker}\n"
         f"{result.ticker} {result.strike:g} {kind_letter} {result.expiry.isoformat()} ({result.dte} DTE)\n"
@@ -39,7 +47,7 @@ def build_alert_text_options(result: ScoreResult) -> str:
         f"Distance from price: {distance_pct:+.0f}%\n"
         f"Premium: ${result.notional_usd:,.0f}\n"
         f"Last Fill: ${result.last_price:,.2f}\n"
-        f"IV: {result.iv * 100:.0f}% vs baseline {result.baseline_vol * 100:.0f}%\n"
+        f"{iv_line}\n"
         f"Anomaly Score: {result.score:.0f}/100\n"
         f"\n"
         f"Manual check: {link}"

@@ -75,7 +75,7 @@ def rescore_with_iv(result: ScoreResult, new_iv: float) -> ScoreResult:
     weights = CONFIG.scoring_weights
     sub_iv = _sub_iv(new_iv, result.baseline_vol)
     composite = weights.vol_oi * result.sub_vol_oi + weights.iv_spike * sub_iv + weights.block_sweep * result.sub_block
-    return dataclasses.replace(result, iv=new_iv, sub_iv=sub_iv, score=composite)
+    return dataclasses.replace(result, iv=new_iv, sub_iv=sub_iv, score=composite, iv_corroborated=True)
 
 
 def score_option_chain(rows: list[OptionContractRow], baseline_vol: float) -> list[ScoreResult]:

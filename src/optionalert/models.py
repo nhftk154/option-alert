@@ -72,6 +72,7 @@ class ScoreResult:
     open_interest: float
     last_price: float
     underlying_price: float
+    iv_corroborated: bool = False
 
 
 @dataclass

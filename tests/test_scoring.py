@@ -75,6 +75,7 @@ def test_score_option_chain_filters_below_threshold():
 def test_rescore_with_iv_only_changes_iv_leg():
     row = make_row(volume=5000, open_interest=100, iv=0.80)
     original = score_contract(row, baseline_vol=0.20)
+    assert original.iv_corroborated is False  # raw yfinance IV, not yet confirmed
 
     rescored = rescore_with_iv(original, new_iv=0.20)  # tvremix says: no spike at all
 
@@ -83,3 +84,4 @@ def test_rescore_with_iv_only_changes_iv_leg():
     assert rescored.sub_vol_oi == original.sub_vol_oi  # unaffected
     assert rescored.sub_block == original.sub_block  # unaffected
     assert rescored.score < original.score
+    assert rescored.iv_corroborated is True
