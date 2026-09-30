@@ -72,13 +72,12 @@ class ScheduleConfig:
 @dataclass(frozen=True)
 class UniverseConfig:
     sp_top_n: int = 100
-    # Metal / crypto-linked ETFs scanned alongside the equities. Empty = scan
-    # only the top-N S&P names. To bring them back: GLD/IAU and SLV/SIVR for
-    # gold/silver, IBIT/FBTC and ETHA/FETH for bitcoin/ethereum (top-2 by real
-    # average dollar volume) - plain equity-style ETFs with listed options,
-    # scanned through the exact same yfinance path as any other ticker.
-    metals: tuple = ()
-    crypto_etfs: tuple = ()
+    # The single most options-liquid ETF per asset: GLD (gold), SLV (silver),
+    # IBIT (bitcoin). Their runner-ups (IAU, SIVR, FBTC) have far thinner
+    # option chains. Plain equity-style ETFs, scanned every run (not sharded)
+    # through the exact same yfinance path as any other ticker.
+    metals: tuple = ("GLD", "SLV")
+    crypto_etfs: tuple = ("IBIT",)
     cache_path: str = "data/universe_cache.json"
     max_cache_age_days: int = 21
 
