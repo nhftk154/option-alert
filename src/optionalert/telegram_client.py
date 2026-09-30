@@ -9,7 +9,12 @@ import requests
 _TIMEOUT = 10
 
 
-def send_telegram_message(text: str) -> None:
+# Telegram's hard cap on a single message's text length.
+MAX_MESSAGE_CHARS = 4096
+
+
+def send_telegram_message(text: str, silent: bool = False) -> None:
+    """silent=True delivers the message without a notification sound."""
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     chat_id = os.environ["TELEGRAM_CHAT_ID"]
     url = f"https://api.telegram.org/bot{token}/sendMessage"
@@ -21,6 +26,7 @@ def send_telegram_message(text: str) -> None:
             "text": text,
             "parse_mode": "HTML",
             "disable_web_page_preview": False,
+            "disable_notification": silent,
         },
         timeout=_TIMEOUT,
     )

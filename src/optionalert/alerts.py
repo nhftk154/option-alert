@@ -7,8 +7,9 @@ from datetime import datetime, timezone
 
 from .config import CONFIG
 from .cooldown import CooldownState, is_on_cooldown, mark_alerted
-from .models import EquityVolumeAlert, OptionKind, ScoreResult
-from .telegram_client import send_telegram_message
+from .models import EquityVolumeAlert, OptionKind, OptionContractRow, ScoreResult
+from .positions import PositionHit
+from .telegram_client import MAX_MESSAGE_CHARS, send_telegram_message
 
 
 def severity_emoji(score: float) -> str:
@@ -44,6 +45,61 @@ def build_alert_text_options(result: ScoreResult) -> str:
         f"\n"
         f"Manual check: {link}"
     )
+
+
+def _contract_label(row: OptionContractRow) -> str:
+    kind_letter = "C" if row.kind == OptionKind.CALL else "P"
+    return f"{row.ticker} {row.strike:g} {kind_letter} {row.expiry.isoformat()} ({row.dte} DTE)"
+
+
+def _format_millions(usd: float) -> str:
+    return f"${usd / 1_000_000:.1f}M"
+
+
+def build_alert_text_big_position(hit: PositionHit) -> str:
+    row = hit.row
+    distance_pct = (row.strike - row.underlying_price) / row.underlying_price * 100
+    return (
+        f"🚨 Big Position: {row.ticker} {_format_millions(hit.premium_usd)}\n"
+        f"{_contract_label(row)}\n"
+        f"\n"
+        f"Premium today: ${hit.premium_usd:,.0f}\n"
+        f"Overall Volume: {row.volume:,.0f}\n"
+        f"Open Interest: {row.open_interest:,.0f}\n"
+        f"Vol/OI: {hit.vol_oi_ratio:.1f}x\n"
+        f"Distance from price: {distance_pct:+.0f}%\n"
+        f"Last Fill: ${row.last_price:,.2f}\n"
+        f"IV: {row.iv * 100:.0f}% vs baseline {hit.baseline_vol * 100:.0f}%\n"
+        f"\n"
+        f"Manual check: {yahoo_option_chain_url(row.ticker)}"
+    )
+
+
+def build_position_digest_messages(hits: list[PositionHit]) -> list[str]:
+    """One silent digest for all info-tier positions found this run, largest
+    premium first, split into as many messages as Telegram's length cap
+    requires."""
+    if not hits:
+        return []
+    thresholds = CONFIG.thresholds
+    header = (
+        f"🟡 Large positions {_format_millions(thresholds.position_info_usd)}-"
+        f"{_format_millions(thresholds.position_alert_usd)} ({len(hits)} new)\n"
+    )
+    lines = [
+        f"{i}. {_contract_label(h.row)} - {_format_millions(h.premium_usd)} (Vol/OI {h.vol_oi_ratio:.1f}x)"
+        for i, h in enumerate(sorted(hits, key=lambda h: h.premium_usd, reverse=True), start=1)
+    ]
+
+    messages = []
+    current = header
+    for line in lines:
+        if len(current) + len(line) + 1 > MAX_MESSAGE_CHARS:
+            messages.append(current.rstrip("\n"))
+            current = ""
+        current += line + "\n"
+    messages.append(current.rstrip("\n"))
+    return messages
 
 
 def build_alert_text_equity_volume(alert: EquityVolumeAlert) -> str:

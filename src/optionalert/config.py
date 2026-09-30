@@ -48,30 +48,37 @@ class Thresholds:
     equity_volume_lookback_days: int = 20
     # Minimum minutes between two alerts for the same (ticker, call/put or "EQUITY").
     cooldown_minutes: int = 30
+    # Large-position alerts (positions.py), by premium traded today in a single
+    # contract (volume x 100 x last price). At/above position_info_usd the
+    # contract goes into a silent Telegram digest; at/above position_alert_usd
+    # it gets its own loud alert. Each contract is reported at most once per
+    # tier per trading day, since volume is cumulative across the day.
+    position_info_usd: float = 1_000_000
+    position_alert_usd: float = 5_000_000
 
 
 @dataclass(frozen=True)
 class ScheduleConfig:
-    # n_shards=6 -> 50 equities/shard, full 300-name coverage every hour.
+    # n_shards=2 -> 50 equities/shard, full 100-name coverage every 20 minutes.
     # Relies on run_scan.py scanning each shard with 8-way concurrency
     # (EQUITY_CONCURRENCY) - sequential scanning measured ~10s/ticker, which
     # would make a 50-ticker shard alone take ~8 minutes. See the
     # timeout-minutes comment in .github/workflows/scan.yml for the full
     # extrapolation to production size.
-    n_shards: int = 6
+    n_shards: int = 2
     shard_interval_minutes: int = 10
 
 
 @dataclass(frozen=True)
 class UniverseConfig:
-    sp_top_n: int = 300
-    # Top-2 by real average dollar volume (measured live, not just AUM) -
-    # GLD/IAU and SLV/SIVR for gold/silver, IBIT/FBTC and ETHA/FETH for
-    # bitcoin/ethereum. All eight are plain equity-style ETFs with listed
-    # options, scanned through the exact same yfinance path as any other
-    # ticker - no separate crypto-native pipeline needed.
-    metals: tuple = ("GLD", "IAU", "SLV", "SIVR")
-    crypto_etfs: tuple = ("IBIT", "FBTC", "ETHA", "FETH")
+    sp_top_n: int = 100
+    # Metal / crypto-linked ETFs scanned alongside the equities. Empty = scan
+    # only the top-N S&P names. To bring them back: GLD/IAU and SLV/SIVR for
+    # gold/silver, IBIT/FBTC and ETHA/FETH for bitcoin/ethereum (top-2 by real
+    # average dollar volume) - plain equity-style ETFs with listed options,
+    # scanned through the exact same yfinance path as any other ticker.
+    metals: tuple = ()
+    crypto_etfs: tuple = ()
     cache_path: str = "data/universe_cache.json"
     max_cache_age_days: int = 21
 
@@ -80,11 +87,17 @@ class UniverseConfig:
 class SheetsConfig:
     history_tab: str = "History"
     cooldown_tab: str = "Cooldown"
+    positions_tab: str = "Positions"
     history_header: tuple = (
         "timestamp_utc", "ticker", "asset_class", "kind", "score",
         "sub_vol_oi", "sub_iv", "sub_block", "strike", "expiry", "notional_usd",
     )
     cooldown_header: tuple = ("ticker", "kind", "last_alert_utc")
+    positions_header: tuple = (
+        "timestamp_utc", "ticker", "kind", "tier", "strike", "expiry", "dte",
+        "premium_usd", "volume", "open_interest", "last_price",
+        "underlying_price", "iv", "contract_id",
+    )
 
 
 @dataclass(frozen=True)

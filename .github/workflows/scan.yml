@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     # Measured after parallelizing (8-way concurrency, see run_scan.py):
     # 10 tickers completed in 52s. Extrapolated to a full production shard
-    # (50 equities + 4 metal ETFs + 4 crypto ETFs) that's ~2-3 min worst
+    # (50 equities, see ScheduleConfig) that's ~2-3 min worst
     # case, plus ~30-40s of checkout/setup/pip-install overhead -> ~3-4 min
     # realistic. 8 minutes leaves ~2-3x headroom for a slower run on the
     # shared runner.

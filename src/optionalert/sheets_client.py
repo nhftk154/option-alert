@@ -1,5 +1,5 @@
-"""Thin gspread wrapper around the two worksheets: History (permanent alert
-log) and Cooldown (transient per-ticker last-alert-time state)."""
+"""Thin gspread wrapper around the worksheets: History (permanent alert
+log), Positions (large-position log) and Cooldown (transient per-ticker last-alert-time state)."""
 
 import json
 import os
@@ -39,4 +39,11 @@ def append_history_rows(spreadsheet, rows: list[list]) -> None:
     if not rows:
         return
     ws = get_or_create_worksheet(spreadsheet, CONFIG.sheets.history_tab, CONFIG.sheets.history_header)
+    ws.append_rows(rows, value_input_option="RAW")
+
+
+def append_position_rows(spreadsheet, rows: list[list]) -> None:
+    if not rows:
+        return
+    ws = get_or_create_worksheet(spreadsheet, CONFIG.sheets.positions_tab, CONFIG.sheets.positions_header)
     ws.append_rows(rows, value_input_option="RAW")

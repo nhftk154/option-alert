@@ -5,7 +5,15 @@ import logging
 import sys
 from datetime import datetime, timezone
 
-from .email_report import build_charts, build_summary, compose_email, fetch_today_history, send_email
+from .email_report import (
+    build_charts,
+    build_summary,
+    compose_email,
+    fetch_today_history,
+    fetch_today_positions,
+    prepare_positions,
+    send_email,
+)
 from .market_hours import was_trading_day
 from .sheets_client import open_spreadsheet
 
@@ -20,12 +28,14 @@ def main() -> int:
         return 0
 
     spreadsheet = open_spreadsheet()
-    df = fetch_today_history(spreadsheet)
-    summary = build_summary(df)
-    charts = build_charts(df)
-    msg = compose_email(df, summary, charts)
+    positions = prepare_positions(fetch_today_positions(spreadsheet))
+    history = fetch_today_history(spreadsheet)
+    equity_volume = history[history["kind"] == "EQUITY_VOLUME"] if not history.empty else history
+    summary = build_summary(positions, equity_volume)
+    charts = build_charts(positions)
+    msg = compose_email(positions, equity_volume, summary, charts)
     send_email(msg)
-    logger.info("EOD report sent: %d alerts today", summary["total"])
+    logger.info("EOD report sent: %d positions today", summary["total"])
     return 0
 
 
