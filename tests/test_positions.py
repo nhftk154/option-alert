@@ -31,18 +31,18 @@ def make_row(premium_usd: float, **overrides) -> OptionContractRow:
 
 
 def test_classify_premium_tiers():
-    assert classify_premium(999_999) is None
-    assert classify_premium(1_000_000) == PositionTier.INFO
+    assert classify_premium(1_999_999) is None
+    assert classify_premium(2_000_000) == PositionTier.INFO
     assert classify_premium(4_900_000) == PositionTier.INFO
     assert classify_premium(5_000_000) == PositionTier.ALERT
 
 
 def test_find_large_positions_keeps_every_contract_sorted_by_size():
     rows = [
-        make_row(1_500_000, strike=230),
+        make_row(2_500_000, strike=230),
         make_row(6_000_000, strike=235),
-        make_row(2_000_000, strike=240, kind=OptionKind.PUT),
-        make_row(400_000, strike=245),  # below threshold
+        make_row(3_000_000, strike=240, kind=OptionKind.PUT),
+        make_row(1_500_000, strike=245),  # below threshold
     ]
     hits = find_large_positions(rows, baseline_vol=0.3)
     assert [h.row.strike for h in hits] == [235, 240, 230]
@@ -54,6 +54,15 @@ def test_find_large_positions_ignores_low_open_interest_floor():
     # what should be reported - the score path's OI floor doesn't apply here.
     hits = find_large_positions([make_row(2_000_000, open_interest=0)], baseline_vol=0.3)
     assert len(hits) == 1
+
+
+def test_find_large_positions_skips_existing_positions_changing_hands():
+    # $6M traded, but less than the OI already open before today (0.7x) -
+    # mostly existing positions changing hands, not new money.
+    old_money = make_row(6_000_000, open_interest=6_000 / 0.7, contract_id="OLD")
+    new_money = make_row(6_000_000, open_interest=100, contract_id="NEW")  # 60x
+    hits = find_large_positions([old_money, new_money], baseline_vol=0.3)
+    assert [h.row.contract_id for h in hits] == ["NEW"]
 
 
 def test_find_large_positions_respects_dte_window():
@@ -69,7 +78,7 @@ def test_big_position_text_mentions_contract_and_premium():
 
 
 def test_digest_splits_under_telegram_limit_and_orders_by_size():
-    rows = [make_row(1_000_000 + i * 10_000, strike=100 + i, contract_id=f"C{i}") for i in range(300)]
+    rows = [make_row(2_000_000 + i * 10_000, strike=100 + i, contract_id=f"C{i}") for i in range(300)]
     hits = find_large_positions(rows, baseline_vol=0.3)
     messages = build_position_digest_messages(hits)
     assert len(messages) > 1

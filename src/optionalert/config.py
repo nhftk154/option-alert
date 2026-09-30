@@ -53,8 +53,13 @@ class Thresholds:
     # contract goes into a silent Telegram digest; at/above position_alert_usd
     # it gets its own loud alert. Each contract is reported at most once per
     # tier per trading day, since volume is cumulative across the day.
-    position_info_usd: float = 1_000_000
+    position_info_usd: float = 2_000_000
     position_alert_usd: float = 5_000_000
+    # Only report contracts where today's volume exceeds this multiple of the
+    # open interest carried in from before today - i.e. mostly new money
+    # entering the contract, not existing positions changing hands (measured
+    # live: most $1M+ contracts on NVDA/TSLA weeklies ran at 0.1x-0.9x).
+    position_min_vol_oi: float = 1.0
 
 
 @dataclass(frozen=True)

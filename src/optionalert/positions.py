@@ -43,14 +43,19 @@ def classify_premium(premium_usd: float) -> PositionTier | None:
 
 def find_large_positions(rows: list[OptionContractRow], baseline_vol: float) -> list[PositionHit]:
     """Every contract (not just the best per ticker) at or above the info
-    threshold, within the DTE window, largest premium first."""
+    threshold, within the DTE window, whose volume today is above
+    position_min_vol_oi x its open interest - largest premium first."""
     thresholds = CONFIG.thresholds
     hits = []
     for row in rows:
         if row.dte < thresholds.min_dte or row.dte > thresholds.max_dte:
             continue
         tier = classify_premium(row.notional_usd)
-        if tier is not None:
-            hits.append(PositionHit(row=row, tier=tier, baseline_vol=baseline_vol))
+        if tier is None:
+            continue
+        hit = PositionHit(row=row, tier=tier, baseline_vol=baseline_vol)
+        if hit.vol_oi_ratio <= thresholds.position_min_vol_oi:
+            continue
+        hits.append(hit)
     hits.sort(key=lambda h: h.premium_usd, reverse=True)
     return hits
