@@ -36,6 +36,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write  # lets a loop that hit its runtime limit start the next one
 
 jobs:
   scan:
@@ -67,3 +68,13 @@ jobs:
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
           if [ -n "${{ inputs.tickers }}" ]; then ARGS="$ARGS --tickers ${{ inputs.tickers }}"; else ARGS="$ARGS --loop"; fi
           python -m optionalert.run_scan $ARGS
+
+      - name: Hand off to a new loop run
+        # run_scan.py leaves this marker when it stopped on its runtime limit
+        # while the market is still open. GitHub's cron can't be relied on to
+        # fire in time (measured: often hours late or not at all), so start
+        # the next loop directly; it queues behind this job's concurrency group.
+        if: always() && hashFiles('scan_handoff_needed') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run scan.yml --repo "${{ github.repository }}" --ref "${{ github.ref_name }}"

@@ -34,6 +34,7 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 from .alerts import (
     build_alert_text_big_position,
@@ -64,6 +65,9 @@ EQUITY_CONCURRENCY = 8  # moderate - yfinance is an unofficial/fragile scraper
 LOOP_MAX_RUNTIME = timedelta(hours=5, minutes=40)
 # How long --loop will wait for the open if it was started before it.
 LOOP_MAX_PREOPEN_WAIT = timedelta(hours=4)
+# Written when a loop stops on LOOP_MAX_RUNTIME before the close; scan.yml
+# then dispatches the next loop run itself.
+HANDOFF_MARKER = "scan_handoff_needed"
 
 
 def parse_args():
@@ -273,7 +277,13 @@ def run_loop(dry_run: bool) -> int:
             break
         _sleep_until(next_start)
 
-    logger.info("loop finished (%s)", "market closed" if datetime.now(timezone.utc) >= close_ts else "runtime limit")
+    if datetime.now(timezone.utc) >= close_ts:
+        logger.info("loop finished (market closed)")
+    else:
+        # Stopped on LOOP_MAX_RUNTIME with the market still open: ask
+        # scan.yml to start the next loop rather than hoping a cron fires.
+        logger.info("loop finished (runtime limit) - requesting a follow-up run")
+        Path(HANDOFF_MARKER).touch()
     return 0
 
 

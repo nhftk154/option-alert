@@ -8,3 +8,4 @@ venv/
 .DS_Store
 .claude/
 setup_notes.local.md
+scan_handoff_needed
