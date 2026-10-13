@@ -2,11 +2,20 @@ name: Scan for unusual options activity
 
 on:
   schedule:
-    # Every 10 minutes, 13:00-21:59 UTC, Mon-Fri. This window is a superset of
-    # NYSE regular hours (09:30-16:00 ET) under both EDT and EST - the exact
-    # gate is done in Python (market_hours.is_nyse_open) so DST drift never
-    # causes a missed or spurious run.
-    - cron: '*/10 13-21 * * 1-5'
+    # Each run is a long-lived loop (run_scan.py --loop) that waits for the
+    # open and then scans every 10 minutes until the close - so a schedule
+    # only has to fire once, roughly on time. A */10 cron was measured firing
+    # just 1-3 times a day, hours late. Several start times spread across the
+    # day make it very likely at least one fires during market hours; while a
+    # loop is running, later ones queue behind it (concurrency group below)
+    # and exit immediately once the market has closed. All times UTC; the
+    # exact open/close (DST, holidays, early closes) is checked in Python.
+    - cron: '7 12 * * 1-5'
+    - cron: '37 13 * * 1-5'
+    - cron: '7 15 * * 1-5'
+    - cron: '37 16 * * 1-5'
+    - cron: '7 18 * * 1-5'
+    - cron: '37 19 * * 1-5'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -19,7 +28,10 @@ on:
         default: ''
 
 concurrency:
-  group: scan
+  # Scheduled loop runs share one group (one loop at a time, the next queued
+  # behind it). A manual --tickers test gets its own group so it never waits
+  # hours behind a running loop.
+  group: scan-${{ inputs.tickers || 'loop' }}
   cancel-in-progress: false
 
 permissions:
@@ -28,13 +40,10 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    # Measured after parallelizing (8-way concurrency, see run_scan.py):
-    # 10 tickers completed in 52s. Extrapolated to a full production shard
-    # (50 equities, see ScheduleConfig) that's ~2-3 min worst
-    # case, plus ~30-40s of checkout/setup/pip-install overhead -> ~3-4 min
-    # realistic. 8 minutes leaves ~2-3x headroom for a slower run on the
-    # shared runner.
-    timeout-minutes: 8
+    # A --loop job runs for up to a whole trading session. GitHub's hard cap
+    # per job is 6h; run_scan.py stops itself at 5h40m (LOOP_MAX_RUNTIME) and
+    # the next queued run takes over. A manual --tickers run takes ~1-2 min.
+    timeout-minutes: 355
     steps:
       - uses: actions/checkout@v4
 
@@ -56,5 +65,5 @@ jobs:
         run: |
           ARGS=""
           if [ "${{ inputs.dry_run }}" = "true" ]; then ARGS="$ARGS --dry-run"; fi
-          if [ -n "${{ inputs.tickers }}" ]; then ARGS="$ARGS --tickers ${{ inputs.tickers }}"; fi
+          if [ -n "${{ inputs.tickers }}" ]; then ARGS="$ARGS --tickers ${{ inputs.tickers }}"; else ARGS="$ARGS --loop"; fi
           python -m optionalert.run_scan $ARGS

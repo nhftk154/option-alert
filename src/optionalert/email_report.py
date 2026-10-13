@@ -6,10 +6,11 @@ import html
 import io
 import os
 import smtplib
-from datetime import date, datetime, timezone
+from datetime import date
 from email.message import EmailMessage
 
 from .config import CONFIG
+from .market_hours import NY_TZ
 from .sheets_client import get_or_create_worksheet
 
 _NUMERIC_POSITION_COLUMNS = (
@@ -19,25 +20,31 @@ _NUMERIC_POSITION_COLUMNS = (
 _DTE_BUCKETS = (("עד שבוע", 7), ("1-2 שבועות", 14), ("2-4 שבועות", 30), ("מעל חודש", 10_000))
 
 
-def _today_rows(spreadsheet, tab: str, header: tuple, today: date):
+def rows_on_ny_date(df, day: date):
+    """Rows whose UTC timestamp falls on `day` in New York. Filtering on the
+    UTC date instead silently emptied every report: the EOD job runs in the
+    New York evening, which is already the next day in UTC."""
+    import pandas as pd
+
+    if df.empty:
+        return df
+    ny_dates = pd.to_datetime(df["timestamp_utc"].astype(str), utc=True, format="ISO8601").dt.tz_convert(NY_TZ).dt.date
+    return df[ny_dates == day].copy()
+
+
+def _rows_for(spreadsheet, tab: str, header: tuple, day: date):
     import pandas as pd
 
     ws = get_or_create_worksheet(spreadsheet, tab, header)
-    df = pd.DataFrame(ws.get_all_records())
-    if df.empty:
-        return df
-    df["date"] = df["timestamp_utc"].astype(str).str.slice(0, 10)
-    return df[df["date"] == today.isoformat()].copy()
+    return rows_on_ny_date(pd.DataFrame(ws.get_all_records()), day)
 
 
-def fetch_today_positions(spreadsheet, today: date | None = None):
-    today = today or datetime.now(timezone.utc).date()
-    return _today_rows(spreadsheet, CONFIG.sheets.positions_tab, CONFIG.sheets.positions_header, today)
+def fetch_today_positions(spreadsheet, day: date):
+    return _rows_for(spreadsheet, CONFIG.sheets.positions_tab, CONFIG.sheets.positions_header, day)
 
 
-def fetch_today_history(spreadsheet, today: date | None = None):
-    today = today or datetime.now(timezone.utc).date()
-    return _today_rows(spreadsheet, CONFIG.sheets.history_tab, CONFIG.sheets.history_header, today)
+def fetch_today_history(spreadsheet, day: date):
+    return _rows_for(spreadsheet, CONFIG.sheets.history_tab, CONFIG.sheets.history_header, day)
 
 
 def prepare_positions(df):
@@ -158,10 +165,9 @@ def _equity_volume_html(equity_volume) -> str:
     return f"<h3>נפח מסחר חריג במניה (פי {CONFIG.thresholds.equity_volume_multiplier:g}+ מהממוצע)</h3><p>{tickers}</p>"
 
 
-def compose_email(positions, equity_volume, summary: dict, charts: list[tuple[str, bytes]], table_limit: int = 50) -> EmailMessage:
+def compose_email(day: date, positions, equity_volume, summary: dict, charts: list[tuple[str, bytes]], table_limit: int = 50) -> EmailMessage:
     msg = EmailMessage()
-    today_str = datetime.now(timezone.utc).date().isoformat()
-    msg["Subject"] = f"דוח יומי - פוזיציות גדולות באופציות ({today_str})"
+    msg["Subject"] = f"דוח יומי - פוזיציות גדולות באופציות ({day.isoformat()})"
     msg["From"] = os.environ["EMAIL_ADDRESS"]
     msg["To"] = os.environ["EMAIL_ADDRESS"]
 

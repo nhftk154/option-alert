@@ -10,7 +10,14 @@ between position_info_usd and that go into a single silent digest sent at the
 end of the run. Each contract is reported at most once per tier per day.
 
 Supports `--dry-run` (print instead of send/write) and `--tickers` (bypass
-sharding, scan an explicit list) for manual workflow_dispatch testing.
+sharding, scan an explicit list, one cycle) for manual workflow_dispatch
+testing.
+
+`--loop` is how scan.yml runs on schedule: GitHub's cron is best-effort and
+was measured firing only 1-3 times a day, hours late, against a */10
+schedule - so one started job instead keeps scanning every
+shard_interval_minutes itself until the close (waiting for the open first if
+it started early), and the schedule only has to fire once in time.
 
 Concurrency note: fetching each ticker is independent network I/O, so the
 whole batch is scanned with one thread pool. Measured: ~10s/ticker
@@ -24,8 +31,9 @@ import argparse
 import logging
 import sys
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .alerts import (
     build_alert_text_big_position,
@@ -37,7 +45,7 @@ from .config import CONFIG
 from .cooldown import alerted_same_day, flush_cooldown_state, load_cooldown_state, mark_alerted
 from .data_equity import fetch_option_chain, fetch_underlying_snapshot
 from .equity_volume import check_equity_volume_anomaly
-from .market_hours import is_nyse_open
+from .market_hours import is_nyse_open, nyse_session
 from .models import AlertRecord
 from .positions import PositionHit, PositionTier, find_large_positions
 from .sharding import get_shard_index, select_shard
@@ -50,11 +58,19 @@ logger = logging.getLogger(__name__)
 
 EQUITY_CONCURRENCY = 8  # moderate - yfinance is an unofficial/fragile scraper
 
+# GitHub Actions kills a job at 6h; stop looping comfortably before that so
+# the final cycle's Sheet writes always land. The next scheduled run (queued
+# behind this one by scan.yml's concurrency group) picks up from there.
+LOOP_MAX_RUNTIME = timedelta(hours=5, minutes=40)
+# How long --loop will wait for the open if it was started before it.
+LOOP_MAX_PREOPEN_WAIT = timedelta(hours=4)
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--tickers", default="", help="Comma-separated override, bypasses sharding")
+    parser.add_argument("--loop", action="store_true", help="Keep scanning every shard interval until the close")
     return parser.parse_args()
 
 
@@ -154,65 +170,128 @@ def _run_pool(fn, items, max_workers, *extra_args):
                 logger.warning("scan failed for %s: %s", item, exc)
 
 
-def main() -> int:
-    args = parse_args()
-    now = datetime.now(timezone.utc)
-
-    override_tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
-
-    if not override_tickers and not is_nyse_open(now):
-        logger.info("NYSE closed - nothing to do")
-        return 0
-
-    # ETFs come from config, not the cache, so emptying them in config takes
+def _batch_for(now, override_tickers, universe) -> list[str]:
+    # ETFs come from config, not the cache, so changing them in config takes
     # effect immediately rather than after the next weekly universe refresh.
     etfs = list(CONFIG.universe.metals) + list(CONFIG.universe.crypto_etfs)
 
     if override_tickers:
         # Manual smoke-test path: doesn't need the committed universe cache.
-        equity_batch = override_tickers + etfs
-    else:
-        universe = get_universe()
-        # The cache is market-cap sorted, so slicing here also narrows an
-        # older, larger cache to sp_top_n without waiting for a refresh.
-        equities = universe.equities[:CONFIG.universe.sp_top_n]
-        shard_index = get_shard_index(now, CONFIG.schedule.n_shards, CONFIG.schedule.shard_interval_minutes)
-        shard = select_shard(equities, shard_index, CONFIG.schedule.n_shards)
-        equity_batch = shard + etfs
-        logger.info(
-            "shard %d/%d: %d equities + %d ETFs",
-            shard_index, CONFIG.schedule.n_shards, len(shard), len(etfs),
-        )
+        return override_tickers + etfs
 
-    try:
-        spreadsheet = open_spreadsheet()
-        cooldown_state = load_cooldown_state(spreadsheet)
-    except Exception as exc:
-        logger.warning("could not open Sheets (%s) - proceeding with empty cooldown state", exc)
-        spreadsheet = None
-        cooldown_state = {}
+    # The cache is market-cap sorted, so slicing here also narrows an older,
+    # larger cache to sp_top_n without waiting for a refresh.
+    equities = universe.equities[:CONFIG.universe.sp_top_n]
+    shard_index = get_shard_index(now, CONFIG.schedule.n_shards, CONFIG.schedule.shard_interval_minutes)
+    shard = select_shard(equities, shard_index, CONFIG.schedule.n_shards)
+    logger.info("shard %d/%d: %d equities + %d ETFs", shard_index, CONFIG.schedule.n_shards, len(shard), len(etfs))
+    return shard + etfs
 
+
+def run_cycle(now, batch, spreadsheet, cooldown_state, dry_run) -> None:
+    """One scan of `batch`: send alerts, then write Positions/History and
+    the updated cooldown state, so the Sheet (and the EOD report reading it)
+    is current after every cycle, not only when a long --loop job ends."""
     history_buffer: list[list] = []
     position_buffer: list[list] = []
     digest_hits: list[PositionHit] = []
     alert_lock = threading.Lock()
 
     _run_pool(
-        scan_equity_symbol, equity_batch, EQUITY_CONCURRENCY,
-        now, cooldown_state, alert_lock, args.dry_run, history_buffer, position_buffer, digest_hits,
+        scan_equity_symbol, batch, EQUITY_CONCURRENCY,
+        now, cooldown_state, alert_lock, dry_run, history_buffer, position_buffer, digest_hits,
     )
-    _send_digest(digest_hits, args.dry_run)
+    _send_digest(digest_hits, dry_run)
 
     logger.info(
-        "run complete: %d new positions (%d in digest), %d stock-volume alerts",
+        "cycle complete: %d new positions (%d in digest), %d stock-volume alerts",
         len(position_buffer), len(digest_hits), len(history_buffer),
     )
 
-    if spreadsheet is not None and not args.dry_run:
+    if spreadsheet is not None and not dry_run:
         append_position_rows(spreadsheet, position_buffer)
         append_history_rows(spreadsheet, history_buffer)
         flush_cooldown_state(spreadsheet, cooldown_state)
 
+
+def next_cycle_start(now: datetime, interval_minutes: int) -> datetime:
+    """The next wall-clock boundary of the shard interval (e.g. :00, :10,
+    :20...), so consecutive cycles land in consecutive shard buckets."""
+    interval = interval_minutes * 60
+    return datetime.fromtimestamp((int(now.timestamp()) // interval + 1) * interval, tz=timezone.utc)
+
+
+def _sleep_until(target: datetime) -> None:
+    delay = (target - datetime.now(timezone.utc)).total_seconds()
+    if delay > 0:
+        time.sleep(delay)
+
+
+def _open_sheets():
+    try:
+        spreadsheet = open_spreadsheet()
+        return spreadsheet, load_cooldown_state(spreadsheet)
+    except Exception as exc:
+        logger.warning("could not open Sheets (%s) - proceeding with empty cooldown state", exc)
+        return None, {}
+
+
+def run_loop(dry_run: bool) -> int:
+    started = datetime.now(timezone.utc)
+    session = nyse_session(started)
+    if session is None:
+        logger.info("not a trading day - nothing to do")
+        return 0
+    open_ts, close_ts = session
+    if started > close_ts:
+        logger.info("NYSE already closed for today - nothing to do")
+        return 0
+    if open_ts - started > LOOP_MAX_PREOPEN_WAIT:
+        logger.info("started %s before the open - too early, exiting", open_ts - started)
+        return 0
+    if started < open_ts:
+        logger.info("waiting %s for the open", open_ts - started)
+        _sleep_until(open_ts)
+
+    universe = get_universe()
+    spreadsheet, cooldown_state = _open_sheets()
+    deadline = min(close_ts, started + LOOP_MAX_RUNTIME)
+    interval = CONFIG.schedule.shard_interval_minutes
+
+    while True:
+        now = datetime.now(timezone.utc)
+        if now > deadline:
+            break
+        try:
+            run_cycle(now, _batch_for(now, [], universe), spreadsheet, cooldown_state, dry_run)
+        except Exception as exc:
+            # One bad cycle (Sheets/Telegram hiccup) must not end the whole
+            # trading day's scanning.
+            logger.exception("cycle failed: %s", exc)
+        next_start = next_cycle_start(datetime.now(timezone.utc), interval)
+        if next_start > deadline:
+            break
+        _sleep_until(next_start)
+
+    logger.info("loop finished (%s)", "market closed" if datetime.now(timezone.utc) >= close_ts else "runtime limit")
+    return 0
+
+
+def main() -> int:
+    args = parse_args()
+    override_tickers = [t.strip() for t in args.tickers.split(",") if t.strip()]
+
+    if args.loop and not override_tickers:
+        return run_loop(args.dry_run)
+
+    now = datetime.now(timezone.utc)
+    if not override_tickers and not is_nyse_open(now):
+        logger.info("NYSE closed - nothing to do")
+        return 0
+
+    universe = None if override_tickers else get_universe()
+    spreadsheet, cooldown_state = _open_sheets()
+    run_cycle(now, _batch_for(now, override_tickers, universe), spreadsheet, cooldown_state, args.dry_run)
     return 0
 
 
